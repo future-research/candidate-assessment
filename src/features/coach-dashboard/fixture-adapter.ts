@@ -1,30 +1,17 @@
 import exercisesData from "../../../data/exercises.json";
 import memberContextData from "../../../data/member-context.json";
+import type {
+  CoachDashboardViewModel,
+  DashboardAdapter,
+  DashboardCopilotCard,
+  DashboardInsightId,
+  DashboardWorkoutItem,
+} from "./dashboard-contract";
 
 export type CatalogExercise = (typeof exercisesData)[number];
 export type MemberContext = typeof memberContextData;
 
-export type WorkoutItem = {
-  id: string;
-  name: string;
-  dose: string;
-  why: string;
-  provenance: string;
-  decisionId?: string;
-  catalogId: string | null;
-  catalogName: string;
-};
-
-type CopilotCard = {
-  id: "brief" | "adherence" | "sleep" | "change" | "churn";
-  kicker: string;
-  title: string;
-  headline?: string;
-  rows?: { label: string; value: string }[];
-  bars?: { label: string; value: number }[];
-  sources: string[];
-  detail?: { recent: string; trend: string; stable: string; action: string };
-};
+export type WorkoutItem = DashboardWorkoutItem;
 
 function initials(name: string) {
   return name.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
@@ -34,7 +21,10 @@ function roundedAverage(values: number[]) {
   return (values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1);
 }
 
-export function buildDashboardFixture(memberContext: MemberContext, exercises: CatalogExercise[]) {
+export function buildDashboardFixture(
+  memberContext: MemberContext,
+  exercises: CatalogExercise[],
+): CoachDashboardViewModel {
   const profile = memberContext.profile;
   const latestAdherence = memberContext.adherence.weekly_completion_pct.at(-1)!;
   const latestWorkout = memberContext.workout_history[0];
@@ -68,7 +58,7 @@ export function buildDashboardFixture(memberContext: MemberContext, exercises: C
   const sleepAverage = roundedAverage(memberContext.biomarkers.sleep_hours_last_7_days);
   const skippedWorkout = memberContext.workout_history.find((workout) => !workout.completed)!;
 
-  const copilotCards: Record<CopilotCard["id"], CopilotCard> = {
+  const copilotCards: Record<DashboardInsightId, DashboardCopilotCard> = {
     brief: {
       id: "brief",
       kicker: "MORNING BRIEF · THU JUN 4",
@@ -149,6 +139,7 @@ export function buildDashboardFixture(memberContext: MemberContext, exercises: C
 
   return {
     member: {
+      id: profile.id,
       name: profile.name,
       initials: initials(profile.name),
       age: profile.age,
@@ -248,3 +239,16 @@ export function buildDashboardFixture(memberContext: MemberContext, exercises: C
 }
 
 export const dashboardFixture = buildDashboardFixture(memberContextData, exercisesData);
+
+export const fixtureDashboardAdapter: DashboardAdapter = {
+  initialState: { status: "ready", data: dashboardFixture },
+  async load() {
+    return { status: "ready", data: dashboardFixture };
+  },
+  capabilities: {
+    startNewDraft: {
+      available: false,
+      reason: "New drafts require a connected coaching service.",
+    },
+  },
+};

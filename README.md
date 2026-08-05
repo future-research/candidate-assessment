@@ -26,3 +26,16 @@ See [`ASSESSMENT.md`](./ASSESSMENT.md) for the complete spec.
 ## Submitting
 
 Build in a GitHub repo with a comprehensive README (architecture and tech-choice rationale, how to run locally, how you used AI, and your trade-offs). Use synthetic data only, then share the link.
+
+## Current UI slice
+
+The root route now renders the copy-first AXON coach dashboard. It uses only the synthetic records in `data/` plus one typed fixture adapter; the `ui/` directory remains a disconnected design reference and is never imported by production code.
+
+```bash
+pnpm install
+pnpm dev
+```
+
+Quality gates are available through `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm test:e2e`, `pnpm test:a11y`, `pnpm test:visual`, and `pnpm build`.
+
+Adjustment, override, Copilot, version history, and publication are deterministic local demonstrations. They do not authenticate a coach, call a model, query Neo4j, persist changes, or deliver a workout. The broader graph-backed implementation remains defined in [`docs/plans/2026-08-05-001-feat-graph-backed-coach-dashboard-plan.md`](./docs/plans/2026-08-05-001-feat-graph-backed-coach-dashboard-plan.md).

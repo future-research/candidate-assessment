@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useReducer, useRef } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 
 import { VersionTimeline } from "@/ui/axon/components/data/VersionTimeline";
-import { dashboardFixture as fixture } from "./fixture-adapter";
+import type { CoachDashboardViewModel, DashboardAdapter } from "./dashboard-contract";
+import { fixtureDashboardAdapter } from "./fixture-adapter";
 import {
   dashboardReducer,
   initialDashboardState,
@@ -33,11 +34,46 @@ const prompts: { id: QuickPromptId; label: string }[] = [
   { id: "churn", label: "Churn risk" },
 ];
 
-export function CoachDashboard() {
+const DashboardViewModelContext = createContext<CoachDashboardViewModel | null>(null);
+
+function useDashboardViewModel() {
+  const viewModel = useContext(DashboardViewModelContext);
+  if (!viewModel) throw new Error("Coach dashboard view model is unavailable.");
+  return viewModel;
+}
+
+export function CoachDashboard({ adapter = fixtureDashboardAdapter }: { adapter?: DashboardAdapter }) {
   const [state, dispatch] = useReducer(dashboardReducer, initialDashboardState);
+  const [loadState, setLoadState] = useState(adapter.initialState);
+  const [adapterAnnouncement, setAdapterAnnouncement] = useState("");
+  const [isDesktop, setIsDesktop] = useState(false);
+  const loadRequest = useRef(0);
   const promptTimer = useRef<number | null>(null);
+  const returnFocus = useRef<HTMLElement | null>(null);
+  const overlayWasOpen = useRef(false);
   const currentVersion = selectCurrentVersion(state);
   const published = selectIsPublished(state);
+  const overlayOpen = Boolean(state.screen || state.dialog);
+
+  const load = async () => {
+    const request = ++loadRequest.current;
+    try {
+      const next = await adapter.load();
+      if (request !== loadRequest.current) return;
+      setLoadState(next);
+      setAdapterAnnouncement(
+        next.status === "ready"
+          ? "Dashboard data ready."
+          : next.status === "empty" || next.status === "error"
+            ? next.message
+            : "Loading dashboard data.",
+      );
+    } catch {
+      if (request !== loadRequest.current) return;
+      setLoadState({ status: "error", message: "Dashboard data could not be loaded.", retryable: true });
+      setAdapterAnnouncement("Dashboard data could not be loaded.");
+    }
+  };
 
   const openScreen = (screen: DashboardScreen, detailId?: string, decisionId?: string) =>
     dispatch({ type: "open-screen", screen, detailId, decisionId });
@@ -55,46 +91,189 @@ export function CoachDashboard() {
     if (promptTimer.current !== null) window.clearTimeout(promptTimer.current);
   }, []);
 
+  useEffect(() => {
+    const request = ++loadRequest.current;
+    void adapter.load().then((next) => {
+      if (request !== loadRequest.current) return;
+      setLoadState(next);
+      setAdapterAnnouncement(
+        next.status === "ready"
+          ? "Dashboard data ready."
+          : next.status === "empty" || next.status === "error"
+            ? next.message
+            : "Loading dashboard data.",
+      );
+    }).catch(() => {
+      if (request !== loadRequest.current) return;
+      setLoadState({ status: "error", message: "Dashboard data could not be loaded.", retryable: true });
+      setAdapterAnnouncement("Dashboard data could not be loaded.");
+    });
+    return () => {
+      loadRequest.current += 1;
+    };
+  }, [adapter]);
+
+  useEffect(() => {
+    const query = window.matchMedia("(min-width: 1024px)");
+    const update = () => setIsDesktop(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (overlayOpen && !overlayWasOpen.current && document.activeElement instanceof HTMLElement) {
+      returnFocus.current = document.activeElement;
+    }
+    if (!overlayOpen && overlayWasOpen.current) {
+      window.requestAnimationFrame(() => returnFocus.current?.focus());
+    }
+    overlayWasOpen.current = overlayOpen;
+  }, [overlayOpen]);
+
+  if (loadState.status !== "ready") {
+    return (
+      <main className={styles.desk}>
+        <div className={`${styles.app} ${styles.loadPanel}`} data-testid="coach-dashboard">
+          <div className={styles.micro}>COACH DASHBOARD</div>
+          <h1 className={styles.heroTitle}>
+            {loadState.status === "loading" ? "Loading member context…" : loadState.message}
+          </h1>
+          {loadState.status === "error" && loadState.retryable && (
+            <button className={styles.secondaryButton} type="button" onClick={() => {
+              setLoadState({ status: "loading" });
+              setAdapterAnnouncement("Loading dashboard data.");
+              void load();
+            }}>Try again</button>
+          )}
+          <div className={styles.srOnly} role="status" aria-live="polite">{adapterAnnouncement}</div>
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <main className={styles.desk}>
-      <div className={styles.app} data-testid="coach-dashboard">
-        {state.screen ? (
-          <DetailScreen state={state} dispatch={dispatch} currentVersion={currentVersion} published={published} />
-        ) : (
-          <>
-            <MemberHeader onOpenProfile={() => openScreen("profile")} />
-            {state.tab === "today" && (
-              <TodayScreen state={state} currentVersion={currentVersion} published={published} dispatch={dispatch} ask={ask} openScreen={openScreen} />
+    <DashboardViewModelContext.Provider value={loadState.data}>
+      <main className={styles.desk}>
+        <div className={styles.app} data-testid="coach-dashboard">
+          {isDesktop ? (
+          <div className={styles.desktopLayout} data-testid="desktop-dashboard">
+            <aside role="region" className={`${styles.desktopRail} ${styles.contextRail}`} aria-label="Today and member context">
+              <MemberHeader onOpenProfile={() => openScreen("profile")} />
+              <DesktopContextRail state={state} dispatch={dispatch} adapter={adapter} setAnnouncement={setAdapterAnnouncement} />
+            </aside>
+            <section className={`${styles.desktopRail} ${styles.workflowRail}`} aria-label="Active workflow">
+              {state.tab === "today" ? (
+                <TodayScreen state={state} currentVersion={currentVersion} published={published} dispatch={dispatch} ask={ask} openScreen={openScreen} />
+              ) : (
+                <WorkoutScreen currentVersion={currentVersion} published={published} dispatch={dispatch} openScreen={openScreen} />
+              )}
+            </section>
+            <aside className={`${styles.desktopRail} ${styles.detailRail}`} aria-label="Copilot and history details">
+              {state.screen ? (
+                <DetailScreen state={state} dispatch={dispatch} currentVersion={currentVersion} published={published} />
+              ) : state.tab === "history" ? (
+                <HistoryScreen state={state} />
+              ) : (
+                <CopilotScreen state={state} dispatch={dispatch} ask={ask} openScreen={openScreen} />
+              )}
+            </aside>
+          </div>
+          ) : (
+          <div className={styles.mobileLayout}>
+            {state.screen ? (
+              <DetailScreen state={state} dispatch={dispatch} currentVersion={currentVersion} published={published} />
+            ) : (
+              <>
+                <MemberHeader onOpenProfile={() => openScreen("profile")} />
+                {state.tab === "today" && (
+                  <TodayScreen state={state} currentVersion={currentVersion} published={published} dispatch={dispatch} ask={ask} openScreen={openScreen} />
+                )}
+                {state.tab === "workout" && (
+                  <WorkoutScreen currentVersion={currentVersion} published={published} dispatch={dispatch} openScreen={openScreen} />
+                )}
+                {state.tab === "copilot" && (
+                  <CopilotScreen state={state} dispatch={dispatch} ask={ask} openScreen={openScreen} />
+                )}
+                {state.tab === "history" && <HistoryScreen state={state} />}
+                <DashboardNavigation state={state} dispatch={dispatch} />
+              </>
             )}
-            {state.tab === "workout" && (
-              <WorkoutScreen currentVersion={currentVersion} published={published} dispatch={dispatch} openScreen={openScreen} />
-            )}
-            {state.tab === "copilot" && (
-              <CopilotScreen state={state} dispatch={dispatch} ask={ask} openScreen={openScreen} />
-            )}
-            {state.tab === "history" && <HistoryScreen state={state} />}
-            <nav className={styles.tabs} aria-label="Dashboard sections">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  className={`${styles.tab} ${state.tab === tab.id ? styles.tabActive : ""}`}
-                  type="button"
-                  aria-current={state.tab === tab.id ? "page" : undefined}
-                  onClick={() => dispatch({ type: "select-tab", tab: tab.id })}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </nav>
-          </>
-        )}
-        {state.dialog && <DashboardDialog state={state} dispatch={dispatch} />}
-      </div>
-    </main>
+          </div>
+          )}
+          <div className={styles.srOnly} role="status" aria-live="polite" aria-atomic="true">
+            {state.announcement} {adapterAnnouncement}
+          </div>
+          {state.dialog && <DashboardDialog state={state} dispatch={dispatch} />}
+        </div>
+      </main>
+    </DashboardViewModelContext.Provider>
   );
 }
 
+function DashboardNavigation({ state, dispatch }: { state: DashboardState; dispatch: React.Dispatch<DashboardAction> }) {
+  return <nav className={styles.tabs} aria-label="Dashboard sections">
+    {tabs.map((tab) => (
+      <button
+        key={tab.id}
+        className={`${styles.tab} ${state.tab === tab.id ? styles.tabActive : ""}`}
+        type="button"
+        aria-current={state.tab === tab.id ? "page" : undefined}
+        onClick={() => dispatch({ type: "select-tab", tab: tab.id })}
+      >
+        {tab.label}
+      </button>
+    ))}
+  </nav>;
+}
+
+function DesktopContextRail({ state, dispatch, adapter, setAnnouncement }: {
+  state: DashboardState;
+  dispatch: React.Dispatch<DashboardAction>;
+  adapter: DashboardAdapter;
+  setAnnouncement: (message: string) => void;
+}) {
+  const fixture = useDashboardViewModel();
+  const capability = adapter.capabilities.startNewDraft;
+  const startNewDraft = async () => {
+    if (!capability.available) return;
+    setAnnouncement("Starting a new draft…");
+    try {
+      const result = await capability.startNewDraft({ memberId: fixture.member.id, requestedBy: "Coach Sam" });
+      setAnnouncement(`New draft ${result.draftId} started.`);
+    } catch {
+      setAnnouncement("A new draft could not be started.");
+    }
+  };
+
+  return <div className={`${styles.scroll} ${styles.contextStack}`}>
+    <DashboardNavigation state={state} dispatch={dispatch} />
+    <div className={styles.sectionLabel}>TODAY AT A GLANCE</div>
+    <div className={styles.metrics}>
+      <div className={styles.metric}><strong>{fixture.metrics.adherence}</strong><div className={styles.micro}>ADHERENCE</div></div>
+      <div className={styles.metric}><strong>{fixture.metrics.sleep}</strong><div className={styles.micro}>SLEEP AVG</div></div>
+      <div className={styles.metric}><strong>{fixture.metrics.restingHeartRate}</strong><div className={styles.micro}>RESTING HR</div></div>
+    </div>
+    <div className={styles.card}>
+      <div className={styles.micro}>CELEBRATE</div>
+      <div className={styles.bodyStrong}>First pain-free squat day</div>
+      <div className={styles.bodyCopy}>{fixture.morningBrief.celebration}</div>
+    </div>
+    <div className={styles.card}>
+      <div className={styles.micro}>WATCH</div>
+      <div className={styles.bodyStrong}>Churn risk elevated</div>
+      <div className={styles.bodyCopy}>{fixture.morningBrief.risk}</div>
+    </div>
+    {capability.available ? (
+      <button className={styles.primaryButton} type="button" onClick={() => void startNewDraft()}>Start new draft</button>
+    ) : (
+      <div className={styles.capabilityNote} aria-label="New draft unavailable">{capability.reason}</div>
+    )}
+  </div>;
+}
+
 function MemberHeader({ onOpenProfile }: { onOpenProfile: () => void }) {
+  const fixture = useDashboardViewModel();
   return (
     <header className={styles.memberHeader}>
       <button className={styles.memberButton} type="button" onClick={onOpenProfile} aria-label="Open Jordan Rivera profile">
@@ -124,6 +303,7 @@ function TodayScreen({
   ask: (id: QuickPromptId) => void;
   openScreen: (screen: DashboardScreen, detailId?: string, decisionId?: string) => void;
 }) {
+  const fixture = useDashboardViewModel();
   return (
     <section className={`${styles.scroll} ${styles.stack}`} aria-label="Today">
       <button className={styles.heroCard} type="button" onClick={() => dispatch({ type: "select-tab", tab: "workout" })} style={{ textAlign: "left", cursor: "pointer" }}>
@@ -179,6 +359,7 @@ function WorkoutScreen({ currentVersion, published, dispatch, openScreen }: {
   dispatch: React.Dispatch<DashboardAction>;
   openScreen: (screen: DashboardScreen, detailId?: string, decisionId?: string) => void;
 }) {
+  const fixture = useDashboardViewModel();
   const sections = fixture.workoutSections.map((section) => ({
     ...section,
     items: section.items.filter((item) => !(item.id === "bench-press" && currentVersion.durationMinutes <= 40)),
@@ -251,6 +432,7 @@ function CopilotScreen({ state, dispatch, ask, openScreen }: {
   ask: (id: QuickPromptId) => void;
   openScreen: (screen: DashboardScreen, detailId?: string) => void;
 }) {
+  const fixture = useDashboardViewModel();
   return (
     <section className={`${styles.scroll} ${styles.stack}`} aria-label="Copilot">
       <div><div className={styles.micro}>COPILOT · FIXTURE DEMO</div><h1 className={styles.heroTitle}>Member context, ready to act on</h1></div>
@@ -268,7 +450,7 @@ function CopilotScreen({ state, dispatch, ask, openScreen }: {
             </div>
             <div className={styles.copilotTitle}>{card.title}</div>
             {card.headline && <div className={styles.subtle}>{card.headline}</div>}
-            {card.bars && <BarChart bars={card.bars} />}
+            {card.bars && <BarChart label={card.kicker} bars={card.bars} />}
             {card.rows?.map((row) => <div className={styles.dataRow} key={row.label}><span className={styles.dataLabel}>{row.label}</span><span>{row.value}</span></div>)}
             <div className={styles.sources}>{card.sources.map((source) => <span className={styles.sourceChip} key={source}>{source}</span>)}</div>
             {card.detail && <button className={styles.secondaryButton} type="button" onClick={() => openScreen("insight", id)}>Recent vs trend vs stable →</button>}
@@ -280,12 +462,14 @@ function CopilotScreen({ state, dispatch, ask, openScreen }: {
   );
 }
 
-function BarChart({ bars }: { bars: { label: string; value: number }[] }) {
+function BarChart({ label, bars }: { label: string; bars: { label: string; value: number }[] }) {
   const max = Math.max(...bars.map((bar) => bar.value));
-  return <div className={styles.barChart}>{bars.map((bar, index) => <div className={styles.barColumn} key={`${bar.label}-${index}`}><div className={styles.barFill} style={{ height: `${Math.max(8, (bar.value / max) * 100)}%` }} /><div className={styles.barLabel}>{bar.label}</div></div>)}</div>;
+  const summary = `${label[0].toUpperCase()}${label.slice(1).toLowerCase()} chart: ${bars.map((bar) => `${bar.label} ${bar.value}%`).join(", ")}`;
+  return <div className={styles.barChart} role="img" aria-label={summary}>{bars.map((bar, index) => <div aria-hidden="true" className={styles.barColumn} key={`${bar.label}-${index}`}><div className={styles.barFill} style={{ height: `${Math.max(8, (bar.value / max) * 100)}%` }} /><div className={styles.barLabel}>{bar.label}</div></div>)}</div>;
 }
 
 function HistoryScreen({ state }: { state: DashboardState }) {
+  const fixture = useDashboardViewModel();
   return (
     <section className={`${styles.scroll} ${styles.stack}`} aria-label="History">
       <div><div className={styles.micro}>VERSION HISTORY</div><h1 className={styles.heroTitle}>Today’s workout trail</h1><div className={styles.subtle}>Content versions are immutable. Publication is recorded separately.</div></div>
@@ -324,6 +508,7 @@ function DetailScreen({ state, dispatch, currentVersion, published }: {
 }
 
 function ProfileScreen({ onBack, dispatch }: { onBack: () => void; dispatch: React.Dispatch<DashboardAction> }) {
+  const fixture = useDashboardViewModel();
   return <><ScreenHeader title={fixture.member.name} kicker="MEMBER PROFILE" onBack={onBack} /><section className={`${styles.scroll} ${styles.stack}`} aria-label="Profile">
     <div className={`${styles.card} ${styles.profileHero}`}><span className={styles.avatar}>{fixture.member.initials}</span><div><div className={styles.heroTitle}>{fixture.member.name}</div><div className={styles.micro}>{fixture.member.age} · {fixture.member.height} CM · {fixture.member.weight} KG</div><div className={styles.micro}>{fixture.member.tier} · SINCE {fixture.member.memberSince.slice(0, 7)}</div></div></div>
     <div className={styles.sectionLabel}>STATUS</div>
@@ -338,6 +523,7 @@ function ProfileScreen({ onBack, dispatch }: { onBack: () => void; dispatch: Rea
 }
 
 function DecisionPathScreen({ state, onBack }: { state: DashboardState; onBack: () => void }) {
+  const fixture = useDashboardViewModel();
   const path = fixture.decisionPaths[state.decisionId as keyof typeof fixture.decisionPaths] ?? fixture.decisionPaths["split-squat"];
   const overridden = state.contentVersions.some((version) => version.kind === "override");
   return <><ScreenHeader title="Decision path" kicker="GRAPH-TRAVERSED · SOURCE-BACKED" onBack={onBack} /><section className={`${styles.scroll} ${styles.stack}`} aria-label="Decision Path">
@@ -349,6 +535,7 @@ function DecisionPathScreen({ state, onBack }: { state: DashboardState; onBack: 
 }
 
 function InsightScreen({ state, dispatch, onBack }: { state: DashboardState; dispatch: React.Dispatch<DashboardAction>; onBack: () => void }) {
+  const fixture = useDashboardViewModel();
   const id = (state.detailId ?? "adherence") as InsightId;
   const card = fixture.copilotCards[id];
   const detail = card.detail;
@@ -372,14 +559,42 @@ function ApproveScreen({ currentVersion, published, dispatch, onBack }: { curren
 }
 
 function DashboardDialog({ state, dispatch }: { state: DashboardState; dispatch: React.Dispatch<DashboardAction> }) {
-  if (state.dialog === "adjustment") return <div className={styles.dialogLayer} role="presentation"><section className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="adjust-title">
+  const dialogRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const focusable = dialog?.querySelector<HTMLElement>("input, textarea, button:not([disabled])");
+    focusable?.focus();
+  }, [state.dialog]);
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      dispatch({ type: "cancel-dialog" });
+      return;
+    }
+    if (event.key !== "Tab" || !dialogRef.current) return;
+    const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>("input, textarea, button:not([disabled])")];
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (!first || !last) return;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
+  if (state.dialog === "adjustment") return <div className={styles.dialogLayer} role="presentation"><section ref={dialogRef} className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="adjust-title" onKeyDown={onKeyDown}>
     <span className={styles.handle} /><div><div id="adjust-title" className={styles.screenTitle}>Adjust today’s workout</div><div className={styles.bodyCopy}>Guided controls create one new content version when applied.</div></div>
     <label><span className={styles.bodyStrong}>Duration · {state.draftDuration} min</span><input className={styles.range} aria-label="Workout duration" type="range" min="30" max="60" step="5" value={state.draftDuration} onChange={(event) => dispatch({ type: "set-draft-duration", duration: Number(event.target.value) })} /></label>
     <div><div className={styles.bodyStrong} style={{ marginBottom: 8 }}>Intensity</div><div className={styles.choiceRow}>{(["Light", "Moderate", "Hard"] as const).map((intensity) => <button className={`${styles.choice} ${state.draftIntensity === intensity ? styles.choiceActive : ""}`} type="button" key={intensity} onClick={() => dispatch({ type: "set-draft-intensity", intensity })}>{intensity}</button>)}</div></div>
     <div className={styles.actionRow}><button className={styles.secondaryButton} type="button" onClick={() => dispatch({ type: "cancel-dialog" })}>Cancel</button><button className={styles.primaryButton} type="button" onClick={() => dispatch({ type: "apply-adjustment" })}>Apply adjustment</button></div>
   </section></div>;
 
-  return <div className={styles.dialogLayer} role="presentation"><section className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="override-title">
+  return <div className={styles.dialogLayer} role="presentation"><section ref={dialogRef} className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="override-title" onKeyDown={onKeyDown}>
     <span className={styles.handle} /><div><div id="override-title" className={styles.screenTitle}>Override: Dumbbell Goblet Split Squat</div><div className={styles.bodyCopy}>Human coach ownership is recorded in ink. The graph warning remains attached.</div></div>
     <div className={styles.card}><div className={styles.bodyStrong}>! Deep knee flexion under load</div><div className={styles.bodyCopy}>Flagged for patellofemoral pain (left, recovering).</div><span className={styles.signalKicker} style={{ marginTop: 9 }}>SNOMED CT · WARNING PROVENANCE</span></div>
     <textarea className={styles.textarea} aria-label="Override reason" placeholder="Reason (required) — e.g. cleared by PT, light load only" value={state.overrideReasonDraft} onChange={(event) => dispatch({ type: "set-override-reason", reason: event.target.value })} />

@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import exercises from "../../data/exercises.json";
 import memberContext from "../../data/member-context.json";
-import { buildDashboardFixture } from "../../src/features/coach-dashboard/fixture-adapter";
+import {
+  buildDashboardFixture,
+  fixtureDashboardAdapter,
+} from "../../src/features/coach-dashboard/fixture-adapter";
 
 describe("dashboard fixture adapter", () => {
   it("derives the flagship member summary from canonical fixture data", () => {
@@ -30,6 +33,18 @@ describe("dashboard fixture adapter", () => {
     expect(fixture.exclusions.find((item) => item.id === "split-squat")).toMatchObject({
       catalogName: "Dumbbell Goblet Split Squat",
       overridable: true,
+    });
+  });
+
+  it("implements the async load-state contract without enabling external draft creation", async () => {
+    expect(fixtureDashboardAdapter.initialState.status).toBe("ready");
+    await expect(fixtureDashboardAdapter.load()).resolves.toMatchObject({
+      status: "ready",
+      data: expect.objectContaining({ member: expect.objectContaining({ name: "Jordan Rivera" }) }),
+    });
+    expect(fixtureDashboardAdapter.capabilities.startNewDraft).toEqual({
+      available: false,
+      reason: "New drafts require a connected coaching service.",
     });
   });
 });

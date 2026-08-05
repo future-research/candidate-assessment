@@ -1,7 +1,9 @@
 export type DashboardTab = "today" | "workout" | "copilot" | "history";
 export type DashboardScreen = "profile" | "insight" | "decision-path" | "approve";
 export type DashboardDialog = "adjustment" | "override";
-export type QuickPromptId = "brief" | "adherence" | "sleep" | "change" | "churn";
+import type { DashboardInsightId } from "./dashboard-contract";
+
+export type QuickPromptId = DashboardInsightId;
 export type InsightId = QuickPromptId;
 
 export type WorkoutVersion = {
@@ -48,6 +50,7 @@ export type DashboardState = {
   contentVersions: WorkoutVersion[];
   publicationEvents: PublicationEvent[];
   lifecycleEvents: LifecycleEvent[];
+  announcement: string;
 };
 
 export type DashboardAction =
@@ -103,6 +106,7 @@ export const initialDashboardState: DashboardState = {
   lifecycleEvents: [
     { id: "lifecycle-1", type: "version-created", subjectId: generatedVersion.id },
   ],
+  announcement: "Dashboard ready.",
 };
 
 function currentVersion(state: DashboardState) {
@@ -143,13 +147,21 @@ function addVersion(
       ...state.lifecycleEvents,
       { id: `lifecycle-${state.lifecycleEvents.length + 1}`, type: "version-created", subjectId: version.id },
     ],
+    announcement: `${kind === "adjustment" ? "Adjustment" : "Override"} saved as version ${number}.`,
   };
 }
 
 export function dashboardReducer(state: DashboardState, action: DashboardAction): DashboardState {
   switch (action.type) {
     case "select-tab":
-      return { ...state, tab: action.tab, screen: null, returnScreen: null, detailId: null };
+      return {
+        ...state,
+        tab: action.tab,
+        screen: null,
+        returnScreen: null,
+        detailId: null,
+        announcement: `${action.tab[0].toUpperCase()}${action.tab.slice(1)} opened.`,
+      };
     case "open-screen":
       return {
         ...state,
@@ -232,6 +244,7 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
           ...state.lifecycleEvents,
           { id: `lifecycle-${state.lifecycleEvents.length + 1}`, type: "published", subjectId: event.id },
         ],
+        announcement: `Version ${currentVersion(state).number} recorded locally. No external delivery occurred.`,
       };
     }
     case "request-prompt":
@@ -240,15 +253,21 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
         ...state,
         pendingPrompt: action.promptId,
         feed: [...state.feed.filter((id) => id !== action.promptId), action.promptId],
+        announcement: `Retrieving ${action.promptId} member context…`,
       };
     case "complete-prompt":
-      return state.pendingPrompt === action.promptId ? { ...state, pendingPrompt: null } : state;
+      return state.pendingPrompt === action.promptId
+        ? { ...state, pendingPrompt: null, announcement: `${action.promptId[0].toUpperCase()}${action.promptId.slice(1)} member context ready.` }
+        : state;
     case "toggle-pin":
       return {
         ...state,
         pins: state.pins.includes(action.insightId)
           ? state.pins.filter((id) => id !== action.insightId)
           : [...state.pins, action.insightId],
+        announcement: state.pins.includes(action.insightId)
+          ? `${action.insightId} removed from Today.`
+          : `${action.insightId} pinned to Today.`,
       };
     default:
       return state;
