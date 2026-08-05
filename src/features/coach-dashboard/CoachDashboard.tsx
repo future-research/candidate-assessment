@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 
 import { VersionTimeline } from "@/ui/axon/components/data/VersionTimeline";
 import type { CoachDashboardViewModel, DashboardAdapter } from "./dashboard-contract";
@@ -55,7 +55,7 @@ export function CoachDashboard({ adapter = fixtureDashboardAdapter }: { adapter?
   const published = selectIsPublished(state);
   const overlayOpen = Boolean(state.screen || state.dialog);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const request = ++loadRequest.current;
     try {
       const next = await adapter.load();
@@ -73,7 +73,7 @@ export function CoachDashboard({ adapter = fixtureDashboardAdapter }: { adapter?
       setLoadState({ status: "error", message: "Dashboard data could not be loaded.", retryable: true });
       setAdapterAnnouncement("Dashboard data could not be loaded.");
     }
-  };
+  }, [adapter]);
 
   const openScreen = (screen: DashboardScreen, detailId?: string, decisionId?: string) =>
     dispatch({ type: "open-screen", screen, detailId, decisionId });
@@ -92,26 +92,15 @@ export function CoachDashboard({ adapter = fixtureDashboardAdapter }: { adapter?
   }, []);
 
   useEffect(() => {
-    const request = ++loadRequest.current;
-    void adapter.load().then((next) => {
-      if (request !== loadRequest.current) return;
-      setLoadState(next);
-      setAdapterAnnouncement(
-        next.status === "ready"
-          ? "Dashboard data ready."
-          : next.status === "empty" || next.status === "error"
-            ? next.message
-            : "Loading dashboard data.",
-      );
-    }).catch(() => {
-      if (request !== loadRequest.current) return;
-      setLoadState({ status: "error", message: "Dashboard data could not be loaded.", retryable: true });
-      setAdapterAnnouncement("Dashboard data could not be loaded.");
+    let active = true;
+    queueMicrotask(() => {
+      if (active) void load();
     });
     return () => {
+      active = false;
       loadRequest.current += 1;
     };
-  }, [adapter]);
+  }, [load]);
 
   useEffect(() => {
     const query = window.matchMedia("(min-width: 1024px)");

@@ -27,12 +27,6 @@ export type PublicationEvent = {
   time: string;
 };
 
-export type LifecycleEvent = {
-  id: string;
-  type: "version-created" | "published";
-  subjectId: string;
-};
-
 export type DashboardState = {
   tab: DashboardTab;
   screen: DashboardScreen | null;
@@ -49,7 +43,6 @@ export type DashboardState = {
   currentVersionId: string;
   contentVersions: WorkoutVersion[];
   publicationEvents: PublicationEvent[];
-  lifecycleEvents: LifecycleEvent[];
   announcement: string;
 };
 
@@ -103,9 +96,6 @@ export const initialDashboardState: DashboardState = {
   currentVersionId: generatedVersion.id,
   contentVersions: [generatedVersion],
   publicationEvents: [],
-  lifecycleEvents: [
-    { id: "lifecycle-1", type: "version-created", subjectId: generatedVersion.id },
-  ],
   announcement: "Dashboard ready.",
 };
 
@@ -143,10 +133,6 @@ function addVersion(
     overrideReasonDraft: "",
     currentVersionId: version.id,
     contentVersions: [...state.contentVersions, version],
-    lifecycleEvents: [
-      ...state.lifecycleEvents,
-      { id: `lifecycle-${state.lifecycleEvents.length + 1}`, type: "version-created", subjectId: version.id },
-    ],
     announcement: `${kind === "adjustment" ? "Adjustment" : "Override"} saved as version ${number}.`,
   };
 }
@@ -173,7 +159,7 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
     case "close-screen":
       return { ...state, screen: state.returnScreen, returnScreen: null, detailId: null };
     case "open-adjustment": {
-      if (isPublished(state)) return { ...state, dialog: null };
+      if (isPublished(state)) return state;
       const version = currentVersion(state);
       return {
         ...state,
@@ -183,7 +169,7 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
       };
     }
     case "open-override":
-      return isPublished(state) ? { ...state, dialog: null } : { ...state, dialog: "override", overrideReasonDraft: "" };
+      return isPublished(state) ? state : { ...state, dialog: "override", overrideReasonDraft: "" };
     case "set-draft-duration":
       return state.dialog === "adjustment" && !isPublished(state)
         ? { ...state, draftDuration: action.duration }
@@ -240,10 +226,6 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
         screen: null,
         dialog: null,
         publicationEvents: [event],
-        lifecycleEvents: [
-          ...state.lifecycleEvents,
-          { id: `lifecycle-${state.lifecycleEvents.length + 1}`, type: "published", subjectId: event.id },
-        ],
         announcement: `Version ${currentVersion(state).number} recorded locally. No external delivery occurred.`,
       };
     }
