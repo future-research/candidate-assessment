@@ -1,0 +1,17 @@
+:root {
+  --ax-font-display: "Archivo Variable", Archivo, system-ui, sans-serif;
+  --ax-font-body: "Archivo Variable", Archivo, system-ui, sans-serif;
+  --ax-font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+  --ax-stretch-display: 125%;
+  --ax-stretch-body: 100%;
+  --ax-type-hero: 600 40px/1.02 var(--ax-font-display);
+  --ax-type-title: 700 20px/1.15 var(--ax-font-display);
+  --ax-type-card-title: 700 17px/1.2 var(--ax-font-body);
+  --ax-type-item: 600 14.5px/1.3 var(--ax-font-body);
+  --ax-type-body: 400 13.5px/1.5 var(--ax-font-body);
+  --ax-type-sub: 400 12.5px/1.45 var(--ax-font-body);
+  --ax-type-micro: 500 10px/1.4 var(--ax-font-mono);
+  --ax-track-display: -0.02em;
+  --ax-track-title: -0.015em;
+  --ax-track-micro: 0.12em;
+}

@@ -1,0 +1,18 @@
+:root {
+  --ax-shadow-card: 0 1px 2px rgb(17 17 17 / 4%);
+  --ax-shadow-float: 0 10px 30px rgb(17 17 17 / 18%);
+  --ax-border: 1px solid var(--ax-line);
+  --ax-border-strong: 1px solid var(--ax-line-strong);
+  --ax-border-dashed: 1px dashed var(--ax-line-strong);
+  --ax-ease: cubic-bezier(.2, .7, .2, 1);
+  --ax-dur-fast: 150ms;
+  --ax-dur-med: 280ms;
+  --ax-scrim: rgb(20 20 18 / 32%);
+}
+
+@keyframes ax-fade-up { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes ax-signal-shift { 0%, 100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+}

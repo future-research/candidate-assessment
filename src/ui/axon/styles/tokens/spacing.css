@@ -1,0 +1,18 @@
+:root {
+  --ax-s1: 4px;
+  --ax-s2: 8px;
+  --ax-s3: 12px;
+  --ax-s4: 16px;
+  --ax-s5: 20px;
+  --ax-s6: 24px;
+  --ax-s7: 32px;
+  --ax-s8: 48px;
+  --ax-r-sm: 10px;
+  --ax-r-md: 14px;
+  --ax-r-lg: 20px;
+  --ax-r-pill: 999px;
+  --ax-hit: 44px;
+  --ax-hit-lg: 52px;
+  --ax-app-max: 430px;
+  --ax-pad-screen: 18px;
+}
