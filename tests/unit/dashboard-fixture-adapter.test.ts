@@ -34,6 +34,20 @@ describe("dashboard fixture adapter", () => {
       catalogName: "Dumbbell Goblet Split Squat",
       overridable: true,
     });
+    expect(fixture.exclusions.every((item) => fixture.decisionPaths[item.decisionId])).toBe(true);
+  });
+
+  it("derives adapter-owned member and date copy for a different member", () => {
+    const alternate = structuredClone(memberContext);
+    alternate.profile.name = "Avery Chen";
+    alternate.coach_brief.generated_for = "2026-07-08";
+    alternate.chat_history[0].ts = "2026-07-07T18:42:00-07:00";
+
+    const fixture = buildDashboardFixture(alternate, exercises);
+
+    expect(fixture.member).toMatchObject({ name: "Avery Chen", initials: "AC" });
+    expect(fixture.asOfDate).toEqual({ weekday: "WED", monthDay: "JUL 8" });
+    expect(fixture.morningBrief.memberMessageDate).toBe("Jul 7");
   });
 
   it("implements the async load-state contract without enabling external draft creation", async () => {

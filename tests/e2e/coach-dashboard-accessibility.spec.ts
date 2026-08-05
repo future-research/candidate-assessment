@@ -19,17 +19,27 @@ test("@a11y announces asynchronous status and gives charts text summaries", asyn
   await page.goto("/");
   await page.getByRole("button", { name: "Copilot", exact: true }).click();
   await expect(page.getByRole("img", { name: /Adherence chart.*100%.*50%/ })).toBeVisible();
+  await expect(page.getByRole("img", { name: /Sleep chart.*6\.1 hours.*6\.3 hours/ })).toBeVisible();
   await page.getByRole("button", { name: "Sleep", exact: true }).click();
   await expect(page.getByRole("status")).toContainText(/Retrieving sleep member context|Sleep member context ready/);
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations).toEqual([]);
 });
 
-test("@a11y removes authored motion when reduced motion is requested", async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: "reduce" });
+test("@a11y reduces AXON signal motion when reduced motion is requested", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.goto("/");
-  const duration = await page.getByTestId("coach-dashboard").evaluate((element) =>
-    Number.parseFloat(getComputedStyle(element).animationDuration),
-  );
-  expect(duration).toBeLessThanOrEqual(0.001);
+  await page.getByRole("button", { name: "Copilot", exact: true }).click();
+  await page.getByRole("button", { name: "Sleep", exact: true }).click();
+  const signal = page.getByTestId("copilot-motion-signal");
+  await expect(signal).toBeVisible();
+
+  const animationDurationInMs = () => signal.evaluate((element) => {
+    const duration = getComputedStyle(element).animationDuration;
+    return duration.endsWith("ms") ? Number.parseFloat(duration) : Number.parseFloat(duration) * 1000;
+  });
+
+  expect(await animationDurationInMs()).toBeGreaterThan(1);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  expect(await animationDurationInMs()).toBeLessThanOrEqual(1);
 });

@@ -3,7 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   dashboardReducer,
   initialDashboardState,
+  type DashboardState,
 } from "../../src/features/coach-dashboard/state";
+
+const completeAdjustment = (state: DashboardState) => dashboardReducer(
+  dashboardReducer(state, { type: "request-adjustment" }),
+  { type: "complete-adjustment", actor: "Coach Sam" },
+);
 
 describe("coach dashboard state", () => {
   it("keeps cancelled edits out of the immutable content history", () => {
@@ -17,19 +23,17 @@ describe("coach dashboard state", () => {
   });
 
   it("creates exactly one version for an adjustment and exactly one for an override", () => {
-    const adjusted = dashboardReducer(
+    const adjusted = completeAdjustment(
       dashboardReducer(
-        dashboardReducer(initialDashboardState, { type: "open-adjustment" }),
-        { type: "set-draft-duration", duration: 40 },
+        dashboardReducer(initialDashboardState, { type: "open-adjustment" }), { type: "set-draft-duration", duration: 40 },
       ),
-      { type: "apply-adjustment" },
     );
     const overridden = dashboardReducer(
       dashboardReducer(
-        dashboardReducer(adjusted, { type: "open-override" }),
+        dashboardReducer(adjusted, { type: "open-override", decisionId: "split-squat" }),
         { type: "set-override-reason", reason: "Cleared by PT; light load only" },
       ),
-      { type: "apply-override" },
+      { type: "apply-override", actor: "Coach Sam", exerciseName: "Split Squat", warning: "Deep flexion" },
     );
 
     expect(adjusted.contentVersions.map((version) => version.kind)).toEqual(["generated", "adjustment"]);
@@ -41,20 +45,35 @@ describe("coach dashboard state", () => {
     expect(overridden.currentVersionId).toBe("workout-v3");
   });
 
+  it("keeps an adjustment pending until one explicit completion and blocks dismissal or duplicates", () => {
+    const editing = dashboardReducer(
+      dashboardReducer(initialDashboardState, { type: "open-adjustment" }),
+      { type: "set-draft-duration", duration: 40 },
+    );
+    const pending = dashboardReducer(editing, { type: "request-adjustment" });
+
+    expect(pending.pendingAdjustment).toBe(true);
+    expect(pending.contentVersions).toHaveLength(1);
+    expect(dashboardReducer(pending, { type: "cancel-dialog" })).toBe(pending);
+    expect(dashboardReducer(pending, { type: "request-adjustment" })).toBe(pending);
+
+    const completed = dashboardReducer(pending, { type: "complete-adjustment", actor: "Coach Lee" });
+    const repeated = dashboardReducer(completed, { type: "complete-adjustment", actor: "Coach Lee" });
+    expect(completed.pendingAdjustment).toBe(false);
+    expect(completed.contentVersions).toHaveLength(2);
+    expect(completed.contentVersions[1]).toMatchObject({ actor: "Coach Lee", durationMinutes: 40 });
+    expect(repeated).toBe(completed);
+  });
+
   it("publishes the exact current version once and freezes later content mutations", () => {
-    const adjusted = dashboardReducer(
+    const adjusted = completeAdjustment(
       dashboardReducer(
-        dashboardReducer(initialDashboardState, { type: "open-adjustment" }),
-        { type: "set-draft-duration", duration: 35 },
+        dashboardReducer(initialDashboardState, { type: "open-adjustment" }), { type: "set-draft-duration", duration: 35 },
       ),
-      { type: "apply-adjustment" },
     );
-    const published = dashboardReducer(adjusted, { type: "publish-current-version" });
-    const repeated = dashboardReducer(published, { type: "publish-current-version" });
-    const attemptedMutation = dashboardReducer(
-      dashboardReducer(published, { type: "open-adjustment" }),
-      { type: "apply-adjustment" },
-    );
+    const published = dashboardReducer(adjusted, { type: "publish-current-version", actor: "Coach Sam" });
+    const repeated = dashboardReducer(published, { type: "publish-current-version", actor: "Coach Sam" });
+    const attemptedMutation = completeAdjustment(dashboardReducer(published, { type: "open-adjustment" }));
 
     expect(published.publicationEvents).toEqual([
       expect.objectContaining({ workoutVersionId: "workout-v2" }),
@@ -65,7 +84,7 @@ describe("coach dashboard state", () => {
   });
 
   it("keeps navigation, Copilot details, and pins available after publication", () => {
-    const published = dashboardReducer(initialDashboardState, { type: "publish-current-version" });
+    const published = dashboardReducer(initialDashboardState, { type: "publish-current-version", actor: "Coach Sam" });
     const onCopilot = dashboardReducer(published, { type: "select-tab", tab: "copilot" });
     const prompted = dashboardReducer(onCopilot, { type: "request-prompt", promptId: "sleep" });
     const pinned = dashboardReducer(prompted, { type: "toggle-pin", insightId: "sleep" });

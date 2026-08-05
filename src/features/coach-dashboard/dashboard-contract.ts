@@ -1,4 +1,5 @@
 export type DashboardInsightId = "brief" | "adherence" | "sleep" | "change" | "churn";
+export type DashboardDecisionId = string;
 
 export type DashboardLoadState<T> =
   | { status: "loading" }
@@ -36,7 +37,7 @@ export type DashboardWorkoutItem = {
   dose: string;
   why: string;
   provenance: string;
-  decisionId?: string;
+  decisionId?: DashboardDecisionId;
   catalogId: string | null;
   catalogName: string;
 };
@@ -47,12 +48,15 @@ export type DashboardCopilotCard = {
   title: string;
   headline?: string;
   rows?: { label: string; value: string }[];
-  bars?: { label: string; value: number }[];
+  bars?: { label: string; value: number; displayValue: string }[];
   sources: string[];
   detail?: { recent: string; trend: string; stable: string; action: string };
 };
 
 export type CoachDashboardViewModel = {
+  coach: { name: string };
+  asOfDate: { weekday: string; monthDay: string };
+  workoutTitle: string;
   member: {
     id: string;
     name: string;
@@ -65,7 +69,16 @@ export type CoachDashboardViewModel = {
     trainingDaysPerWeek: number;
   };
   metrics: { adherence: string; sleep: string; restingHeartRate: string };
-  morningBrief: { celebration: string; risk: string; memberMessage: string };
+  morningBrief: {
+    celebrationTitle: string;
+    celebration: string;
+    celebrationSummary: string;
+    riskTitle: string;
+    risk: string;
+    riskSummary: string;
+    memberMessage: string;
+    memberMessageDate: string;
+  };
   profile: {
     injury: {
       id: string;
@@ -76,6 +89,9 @@ export type CoachDashboardViewModel = {
       since: string;
       notes: string;
       snomedct_hint: string;
+      displayName: string;
+      sinceLabel: string;
+      sourceLabel: string;
     };
     goals: { id: string; text: string; priority: number; target_date: string | null }[];
     preferences: {
@@ -88,7 +104,7 @@ export type CoachDashboardViewModel = {
     equipment: string[];
   };
   workoutSections: { title: string; items: DashboardWorkoutItem[] }[];
-  exclusions: (DashboardWorkoutItem & { reason: string; overridable: boolean })[];
+  exclusions: (DashboardWorkoutItem & { decisionId: DashboardDecisionId; reason: string; overridable: boolean })[];
   decisionPaths: Record<
     string,
     {

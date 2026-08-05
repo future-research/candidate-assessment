@@ -21,6 +21,10 @@ function roundedAverage(values: number[]) {
   return (values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1);
 }
 
+function shortDate(value: string) {
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(value));
+}
+
 export function buildDashboardFixture(
   memberContext: MemberContext,
   exercises: CatalogExercise[],
@@ -54,6 +58,7 @@ export function buildDashboardFixture(
   const adherenceBars = memberContext.adherence.weekly_completion_pct.map(({ week_of, pct }) => ({
     label: `${Number(week_of.slice(5, 7))}/${Number(week_of.slice(8, 10))}`,
     value: pct,
+    displayValue: `${pct}%`,
   }));
   const sleepAverage = roundedAverage(memberContext.biomarkers.sleep_hours_last_7_days);
   const skippedWorkout = memberContext.workout_history.find((workout) => !workout.completed)!;
@@ -89,7 +94,11 @@ export function buildDashboardFixture(
       kicker: "SLEEP",
       title: `${sleepAverage}h avg vs 7h goal`,
       headline: "Two nights under 5.5h this week; weekends recover.",
-      bars: memberContext.biomarkers.sleep_hours_last_7_days.map((value, index) => ({ label: ["F", "S", "S", "M", "T", "W", "T"][index], value: value * 12.5 })),
+      bars: memberContext.biomarkers.sleep_hours_last_7_days.map((value, index) => ({
+        label: ["F", "S", "S", "M", "T", "W", "T"][index],
+        value,
+        displayValue: `${value} hours`,
+      })),
       sources: ["sleep log · 7 days", "goal: 7h weeknights"],
       detail: {
         recent: `${sleepAverage}h average over the last 7 days; ${Math.min(...memberContext.biomarkers.sleep_hours_last_7_days)}h was the low.`,
@@ -138,6 +147,12 @@ export function buildDashboardFixture(
   );
 
   return {
+    coach: { name: "Coach Sam" },
+    asOfDate: {
+      weekday: new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" }).format(new Date(memberContext.coach_brief.generated_for)).toUpperCase(),
+      monthDay: shortDate(memberContext.coach_brief.generated_for).toUpperCase(),
+    },
+    workoutTitle: `${injury.joint}-safe strength`,
     member: {
       id: profile.id,
       name: profile.name,
@@ -155,12 +170,22 @@ export function buildDashboardFixture(
       restingHeartRate: `${memberContext.biomarkers.resting_hr_bpm}`,
     },
     morningBrief: {
+      celebrationTitle: "First pain-free squat day",
       celebration: memberContext.coach_brief.morning_tasks[0].text,
+      celebrationSummary: `Box squats ${shortDate(latestWorkout.date)} — “knee felt okay”. Worth celebrating today.`,
+      riskTitle: `Churn risk ${memberContext.coach_brief.churn_risk.level}`,
       risk: memberContext.coach_brief.morning_tasks[1].text,
+      riskSummary: `Adherence ${memberContext.adherence.weekly_completion_pct[0].pct}% → ${latestAdherence.pct}% in 2 weeks · logins down`,
       memberMessage: memberContext.chat_history[0].text,
+      memberMessageDate: shortDate(memberContext.chat_history[0].ts.slice(0, 10)),
     },
     profile: {
-      injury,
+      injury: {
+        ...injury,
+        displayName: injury.notes.split(" after ")[0],
+        sinceLabel: shortDate(injury.since),
+        sourceLabel: `INJURY REPORT · ${shortDate(injury.since).toUpperCase()} · SNOMED CT SUBSET`,
+      },
       goals: memberContext.goals,
       preferences: memberContext.preferences,
       equipment: memberContext.equipment_available,
@@ -191,9 +216,9 @@ export function buildDashboardFixture(
       },
     ],
     exclusions: [
-      { ...splitSquat, reason: "Deep knee flexion under load — patellofemoral pain (recovering)", overridable: true },
-      { ...catalogItem("jumps", "Static Jump", "", "", "CATALOG · INJURY REPORT", "jumps"), reason: "Plyometric loading contraindicated during knee recovery", overridable: false },
-      { ...contextualItem("deadlifts", "Deadlift variations", "", "", "MEMBER PREFERENCES", "deadlifts"), reason: "Member dislikes deadlifts — explicit preference exclusion", overridable: false },
+      { ...splitSquat, decisionId: "split-squat", reason: "Deep knee flexion under load — patellofemoral pain (recovering)", overridable: true },
+      { ...catalogItem("jumps", "Static Jump", "", "", "CATALOG · INJURY REPORT", "jumps"), decisionId: "jumps", reason: "Plyometric loading contraindicated during knee recovery", overridable: false },
+      { ...contextualItem("deadlifts", "Deadlift variations", "", "", "MEMBER PREFERENCES", "deadlifts"), decisionId: "deadlifts", reason: "Member dislikes deadlifts — explicit preference exclusion", overridable: false },
     ],
     decisionPaths: {
       "split-squat": {

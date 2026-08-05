@@ -31,3 +31,16 @@ test("remains usable without horizontal overflow at 320px", async ({ page }) => 
   await page.getByRole("button", { name: "Workout", exact: true }).click();
   await expect(page.getByRole("button", { name: "Approve & record locally" })).toBeVisible();
 });
+
+test("returns focus to the stable trigger after mobile detail reflows to desktop", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open Jordan Rivera profile" }).click();
+  await expect(page.getByRole("region", { name: "Profile" })).toBeVisible();
+
+  await page.setViewportSize({ width: 1440, height: 960 });
+  const desktopTrigger = page.getByRole("button", { name: "Open Jordan Rivera profile" });
+  await expect(desktopTrigger).toBeVisible();
+  await page.getByRole("button", { name: "Go back" }).click();
+
+  await expect(desktopTrigger).toBeFocused();
+});

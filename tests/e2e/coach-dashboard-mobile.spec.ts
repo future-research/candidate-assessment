@@ -16,6 +16,11 @@ test("flagship coach flow preserves versions and publishes the exact current ver
   await page.getByRole("button", { name: "Adjust", exact: true }).click();
   await page.getByRole("slider", { name: "Workout duration" }).fill("40");
   await page.getByRole("button", { name: "Apply adjustment" }).click();
+  await expect(page.getByRole("button", { name: "Applying adjustment…" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Cancel", exact: true })).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Adjust today’s workout" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Adjust today’s workout" })).not.toBeVisible({ timeout: 2_000 });
   await page.getByRole("button", { name: "Override", exact: true }).click();
   await page.getByRole("textbox", { name: "Override reason" }).fill("Cleared by PT; light load only");
   await page.getByRole("button", { name: "Override — keep warning" }).click();

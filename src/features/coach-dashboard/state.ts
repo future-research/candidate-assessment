@@ -1,7 +1,7 @@
 export type DashboardTab = "today" | "workout" | "copilot" | "history";
 export type DashboardScreen = "profile" | "insight" | "decision-path" | "approve";
 export type DashboardDialog = "adjustment" | "override";
-import type { DashboardInsightId } from "./dashboard-contract";
+import type { DashboardDecisionId, DashboardInsightId } from "./dashboard-contract";
 
 export type QuickPromptId = DashboardInsightId;
 export type InsightId = QuickPromptId;
@@ -11,11 +11,11 @@ export type WorkoutVersion = {
   number: number;
   kind: "generated" | "adjustment" | "override";
   title: string;
-  actor: "Axon" | "Coach Sam";
+  actor: string;
   time: string;
   durationMinutes: number;
   intensity: "Light" | "Moderate" | "Hard";
-  splitSquatIncluded: boolean;
+  overrideDecisionId: DashboardDecisionId | null;
   overrideReason: string | null;
   changes: string[];
 };
@@ -23,7 +23,7 @@ export type WorkoutVersion = {
 export type PublicationEvent = {
   id: string;
   workoutVersionId: string;
-  actor: "Coach Sam";
+  actor: string;
   time: string;
 };
 
@@ -33,12 +33,14 @@ export type DashboardState = {
   returnScreen: DashboardScreen | null;
   dialog: DashboardDialog | null;
   detailId: string | null;
-  decisionId: string;
+  decisionId: DashboardDecisionId | null;
   pendingPrompt: QuickPromptId | null;
   feed: QuickPromptId[];
   pins: InsightId[];
   draftDuration: number;
   draftIntensity: WorkoutVersion["intensity"];
+  pendingAdjustment: boolean;
+  overrideDecisionIdDraft: DashboardDecisionId | null;
   overrideReasonDraft: string;
   currentVersionId: string;
   contentVersions: WorkoutVersion[];
@@ -48,17 +50,19 @@ export type DashboardState = {
 
 export type DashboardAction =
   | { type: "select-tab"; tab: DashboardTab }
-  | { type: "open-screen"; screen: DashboardScreen; detailId?: string; decisionId?: string }
+  | { type: "open-screen"; screen: Exclude<DashboardScreen, "decision-path">; detailId?: string }
+  | { type: "open-screen"; screen: "decision-path"; decisionId: DashboardDecisionId }
   | { type: "close-screen" }
   | { type: "open-adjustment" }
-  | { type: "open-override" }
+  | { type: "open-override"; decisionId: DashboardDecisionId }
   | { type: "set-draft-duration"; duration: number }
   | { type: "set-draft-intensity"; intensity: WorkoutVersion["intensity"] }
   | { type: "set-override-reason"; reason: string }
   | { type: "cancel-dialog" }
-  | { type: "apply-adjustment" }
-  | { type: "apply-override" }
-  | { type: "publish-current-version" }
+  | { type: "request-adjustment" }
+  | { type: "complete-adjustment"; actor: string }
+  | { type: "apply-override"; actor: string; exerciseName: string; warning: string }
+  | { type: "publish-current-version"; actor: string }
   | { type: "request-prompt"; promptId: QuickPromptId }
   | { type: "complete-prompt"; promptId: QuickPromptId }
   | { type: "toggle-pin"; insightId: InsightId };
@@ -72,7 +76,7 @@ const generatedVersion: WorkoutVersion = {
   time: "6:02 AM",
   durationMinutes: 50,
   intensity: "Moderate",
-  splitSquatIncluded: false,
+  overrideDecisionId: null,
   overrideReason: null,
   changes: [
     "Built from goals, injury, equipment and recent training",
@@ -86,12 +90,14 @@ export const initialDashboardState: DashboardState = {
   returnScreen: null,
   dialog: null,
   detailId: null,
-  decisionId: "split-squat",
+  decisionId: null,
   pendingPrompt: null,
   feed: ["brief", "adherence", "sleep", "change", "churn"],
   pins: [],
   draftDuration: generatedVersion.durationMinutes,
   draftIntensity: generatedVersion.intensity,
+  pendingAdjustment: false,
+  overrideDecisionIdDraft: null,
   overrideReasonDraft: "",
   currentVersionId: generatedVersion.id,
   contentVersions: [generatedVersion],
@@ -112,6 +118,7 @@ function addVersion(
   kind: "adjustment" | "override",
   changes: string[],
   updates: Partial<WorkoutVersion>,
+  actor: string,
 ): DashboardState {
   const previous = currentVersion(state);
   const number = state.contentVersions.length + 1;
@@ -122,7 +129,7 @@ function addVersion(
     number,
     kind,
     title: kind === "adjustment" ? "Coach adjustment" : "Safety override",
-    actor: "Coach Sam",
+    actor,
     time: kind === "adjustment" ? "7:41 AM" : "7:48 AM",
     changes,
   };
@@ -130,6 +137,8 @@ function addVersion(
   return {
     ...state,
     dialog: null,
+    pendingAdjustment: false,
+    overrideDecisionIdDraft: null,
     overrideReasonDraft: "",
     currentVersionId: version.id,
     contentVersions: [...state.contentVersions, version],
@@ -153,8 +162,8 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
         ...state,
         screen: action.screen,
         returnScreen: action.screen === "insight" || action.screen === "decision-path" ? state.screen : null,
-        detailId: action.detailId ?? state.detailId,
-        decisionId: action.decisionId ?? state.decisionId,
+        detailId: "detailId" in action ? action.detailId ?? state.detailId : state.detailId,
+        decisionId: action.screen === "decision-path" ? action.decisionId : state.decisionId,
       };
     case "close-screen":
       return { ...state, screen: state.returnScreen, returnScreen: null, detailId: null };
@@ -164,12 +173,18 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
       return {
         ...state,
         dialog: "adjustment",
+        pendingAdjustment: false,
         draftDuration: version.durationMinutes,
         draftIntensity: version.intensity,
       };
     }
     case "open-override":
-      return isPublished(state) ? state : { ...state, dialog: "override", overrideReasonDraft: "" };
+      return isPublished(state) ? state : {
+        ...state,
+        dialog: "override",
+        overrideDecisionIdDraft: action.decisionId,
+        overrideReasonDraft: "",
+      };
     case "set-draft-duration":
       return state.dialog === "adjustment" && !isPublished(state)
         ? { ...state, draftDuration: action.duration }
@@ -183,9 +198,14 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
         ? { ...state, overrideReasonDraft: action.reason }
         : state;
     case "cancel-dialog":
-      return { ...state, dialog: null, overrideReasonDraft: "" };
-    case "apply-adjustment": {
-      if (state.dialog !== "adjustment" || isPublished(state)) return { ...state, dialog: null };
+      return state.pendingAdjustment
+        ? state
+        : { ...state, dialog: null, overrideDecisionIdDraft: null, overrideReasonDraft: "" };
+    case "request-adjustment":
+      if (state.dialog !== "adjustment" || state.pendingAdjustment || isPublished(state)) return state;
+      return { ...state, pendingAdjustment: true, announcement: "Applying adjustment…" };
+    case "complete-adjustment": {
+      if (state.dialog !== "adjustment" || !state.pendingAdjustment || isPublished(state)) return state;
       const dropBench = state.draftDuration <= 40;
       return addVersion(
         state,
@@ -196,20 +216,22 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
           "Rest guidance re-sized to window",
         ],
         { durationMinutes: state.draftDuration, intensity: state.draftIntensity },
+        action.actor,
       );
     }
     case "apply-override": {
       const reason = state.overrideReasonDraft.trim();
-      if (state.dialog !== "override" || isPublished(state) || reason.length < 4) return state;
+      if (state.dialog !== "override" || !state.overrideDecisionIdDraft || isPublished(state) || reason.length < 4) return state;
       return addVersion(
         state,
         "override",
         [
-          "Dumbbell Goblet Split Squat added · 2×8 light",
-          "Deep-flexion warning retained on version",
+          `${action.exerciseName} added`,
+          `${action.warning} · warning retained on version`,
           `Reason: “${reason}”`,
         ],
-        { splitSquatIncluded: true, overrideReason: reason },
+        { overrideDecisionId: state.overrideDecisionIdDraft, overrideReason: reason },
+        action.actor,
       );
     }
     case "publish-current-version": {
@@ -217,7 +239,7 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
       const event: PublicationEvent = {
         id: "publication-1",
         workoutVersionId: state.currentVersionId,
-        actor: "Coach Sam",
+        actor: action.actor,
         time: "7:52 AM",
       };
       return {
